@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Post build files to a Telegram channel through a local Bot API server.
 
-The server runs with --local, which raises the 50 MB limit of the public
-Bot API to 2000 MB and takes a file by its path on the server's side, so
-nothing is uploaded over HTTP: the files are in a directory the server
-sees as --server-dir.
+The server runs with --local on the same machine, which raises the 50 MB
+limit of the public Bot API to 2000 MB and takes a file by its path, so
+nothing is uploaded over HTTP.
 
 The files go out as documents, in albums of up to ten, with the caption
 under the last one. The caption is either a ready HTML file or is put
@@ -102,10 +101,8 @@ def check_files(paths):
         names.add(path.name)
 
 
-def reference(path, server_dir):
-    """The address of the file as the server finds it."""
-    if server_dir:
-        return f"file://{server_dir.rstrip('/')}/{path.name}"
+def reference(path):
+    """The address of the file for the server, which decodes it as a URL."""
     return path.resolve().as_uri()
 
 
@@ -175,21 +172,19 @@ def wait_ready(api, token, wait=READY_WAIT, sleep=time.sleep, clock=time.monoton
         return answer.get("result") or {}
 
 
-def publish(api, token, chat, paths, text, server_dir=None, sleep=time.sleep):
+def publish(api, token, chat, paths, text, sleep=time.sleep):
     """Post the files; returns [{"file": <name>, "message_id": <id>}]."""
     posted = []
     albums = [paths[start:start + ALBUM] for start in range(0, len(paths), ALBUM)]
     for index, album in enumerate(albums):
         last = index + 1 == len(albums)
         if len(album) == 1:
-            payload = {"chat_id": chat, "document": reference(album[0], server_dir)}
+            payload = {"chat_id": chat, "document": reference(album[0])}
             if last:
                 payload.update(caption=text, parse_mode="HTML")
             messages = [call(api, token, "sendDocument", payload, sleep=sleep)]
         else:
-            media = [
-                {"type": "document", "media": reference(path, server_dir)} for path in album
-            ]
+            media = [{"type": "document", "media": reference(path)} for path in album]
             if last:
                 media[-1].update(caption=text, parse_mode="HTML")
             messages = call(
@@ -230,7 +225,6 @@ def main(argv=None):
     parser.add_argument("--chat-id", required=True, help="the channel: its id or @username")
     parser.add_argument("--copy-to", action="append", default=[], metavar="CHAT",
                         help="another channel that gets a copy of the post")
-    parser.add_argument("--server-dir", help="where the server sees the directory of the files")
     parser.add_argument("--title", help="the name of the application")
     parser.add_argument("--version")
     parser.add_argument("--hashtag", action="append", default=[], help="without the '#'")
@@ -255,7 +249,7 @@ def main(argv=None):
         if args.dry_run:
             print(text)
             for path in paths:
-                print(reference(path, args.server_dir))
+                print(reference(path))
             for target in args.copy_to:
                 print(f"copy to {target}")
             return 0
@@ -264,7 +258,7 @@ def main(argv=None):
             raise PublishError("CHANNEL_BOT_TOKEN is not set")
         bot = wait_ready(args.api, token)
         print(f"Posting as @{bot.get('username')} to {args.chat_id}.", flush=True)
-        posted = publish(args.api, token, args.chat_id, paths, text, args.server_dir)
+        posted = publish(args.api, token, args.chat_id, paths, text)
         # Written before the copies: a failing copy must not hide the post.
         if args.out:
             Path(args.out).write_text(json.dumps(posted) + "\n", encoding="utf-8")

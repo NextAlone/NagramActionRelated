@@ -3,11 +3,13 @@
 #   uses: NextAlone/NagramActionRelated/channel-publish@<commit>
 #
 # The files are too large for the public Bot API (50 MB), so the step
-# starts a Bot API server of its own for the duration of the call. The
-# image is the one bot-api-image.yml builds, named by digest: the
-# container gets the bot token and the files, so it is never a third-party
-# image. Needs a Linux runner with Docker; a macOS or Windows build hands
-# its files over as an artifact to a job that runs this.
+# runs a Bot API server of its own for the duration of the call. The
+# server is the binary bot-api-binary.yml builds from a pinned
+# tdlib/telegram-bot-api commit and attaches to a release of this
+# repository; it is taken by the checksum recorded below, because it is
+# handed the bot token and the files. Needs an ubuntu-24.04 runner, the
+# system the binary is built on; a macOS or Windows build hands its files
+# over as an artifact to a job that runs this.
 
 name: Publish to a Telegram channel.
 description: Post the files of a directory to a Telegram channel through a local Bot API server.
@@ -22,11 +24,6 @@ inputs:
   api-hash:
     description: Telegram API hash the Bot API server runs with.
     required: true
-  image:
-    description: Bot API server image, ghcr.io/<owner>/telegram-bot-api@sha256:<digest>.
-    required: true
-  registry-token:
-    description: Token to pull the image with, when the package is not public.
   chat-id:
     description: The channel, its id or @username.
     required: true
@@ -60,12 +57,13 @@ runs:
       id: publish
       shell: bash
       env:
+        # The release of this repository that holds the server and the
+        # SHA-256 of the binary; bot-api-binary.yml prints both.
+        BOT_API_RELEASE: ""
+        BOT_API_SHA256: ""
         CHANNEL_BOT_TOKEN: ${{ inputs.bot-token }}
         TELEGRAM_API_ID: ${{ inputs.api-id }}
         TELEGRAM_API_HASH: ${{ inputs.api-hash }}
-        TELEGRAM_LOCAL: 1
-        IMAGE: ${{ inputs.image }}
-        REGISTRY_TOKEN: ${{ inputs.registry-token }}
         CHAT_ID: ${{ inputs.chat-id }}
         COPY_TO: ${{ inputs.copy-to }}
         DIRECTORY: ${{ inputs.directory }}
@@ -77,25 +75,21 @@ runs:
         CAPTION_FILE: ${{ inputs.caption-file }}
       run: |
         set -euo pipefail
-        if ! [[ "$IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
-          echo "::error::The Bot API image must be a digest-pinned ghcr.io reference."
+        if [ -z "$BOT_API_RELEASE" ] || [ -z "$BOT_API_SHA256" ]; then
+          echo "::error::This commit of the action records no Bot API server binary."
           exit 1
         fi
 
-        directory="$(realpath "$DIRECTORY")"
         files=()
         while IFS= read -r -d '' file; do
           files+=("$file")
-        done < <(find "$directory" -maxdepth 1 -type f -print0 | sort -z)
+        done < <(find "$(realpath "$DIRECTORY")" -maxdepth 1 -type f -print0 | sort -z)
         if [ ${#files[@]} -eq 0 ]; then
           echo "::error::$DIRECTORY has no files to post."
           exit 1
         fi
-        # The server runs as its own user and reads the files from the mount.
-        chmod a+rx "$directory"
-        chmod a+r "${files[@]}"
 
-        arguments=(--chat-id "$CHAT_ID" --server-dir /upload --out "$RUNNER_TEMP/channel-messages.json")
+        arguments=(--chat-id "$CHAT_ID" --out "$RUNNER_TEMP/channel-messages.json")
         for chat in $COPY_TO; do
           arguments+=(--copy-to "$chat")
         done
@@ -116,24 +110,36 @@ runs:
           done <<< "$LINKS"
         fi
 
-        if [ -n "$REGISTRY_TOKEN" ]; then
-          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-        fi
-        container="$(docker run -d \
-          -p 127.0.0.1::8081 \
-          -e TELEGRAM_API_ID -e TELEGRAM_API_HASH -e TELEGRAM_LOCAL \
-          -v "$directory:/upload:ro" \
-          "$IMAGE")"
+        work="$(mktemp -d "$RUNNER_TEMP/bot-api.XXXXXX")"
+        server=""
         finish() {
           status=$?
-          if [ "$status" -ne 0 ]; then
-            docker logs --tail 50 "$container" || true
+          if [ -n "$server" ]; then
+            kill "$server" 2> /dev/null || true
+            wait "$server" 2> /dev/null || true
           fi
-          docker rm -f "$container" > /dev/null
+          if [ "$status" -ne 0 ] && [ -f "$work/log" ]; then
+            tail -n 50 "$work/log"
+          fi
+          # The working directory of the server holds the session of the bot.
+          rm -rf "$work"
         }
         trap finish EXIT
 
+        curl --fail --silent --show-error --location --retry 3 \
+          --output "$work/telegram-bot-api" \
+          "https://github.com/NextAlone/NagramActionRelated/releases/download/$BOT_API_RELEASE/telegram-bot-api-linux-x86_64"
+        echo "$BOT_API_SHA256  $work/telegram-bot-api" | sha256sum --check --quiet
+        chmod +x "$work/telegram-bot-api"
+
+        port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+        mkdir "$work/data" "$work/temp"
+        # The server reads the API id and hash from the environment.
+        "$work/telegram-bot-api" --local \
+          --http-ip-address=127.0.0.1 --http-port="$port" \
+          --dir="$work/data" --temp-dir="$work/temp" --log="$work/log" &
+        server=$!
+
         python3 "$GITHUB_ACTION_PATH/channel_publish.py" \
-          --api "http://$(docker port "$container" 8081/tcp | head -n 1)" \
-          "${arguments[@]}" "${files[@]}"
+          --api "http://127.0.0.1:$port" "${arguments[@]}" "${files[@]}"
         echo "messages=$(cat "$RUNNER_TEMP/channel-messages.json")" >> "$GITHUB_OUTPUT"

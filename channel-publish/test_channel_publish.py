@@ -123,13 +123,16 @@ class PublishTest(unittest.TestCase):
             paths.append(path)
         return paths
 
+    def uri(self, name):
+        return (self.root / name).resolve().as_uri()
+
     def serve(self, *answers):
         self.server = Server(answers)
         return self.server
 
     def test_single_file_is_a_document(self):
         server = self.serve((200, {"ok": True, "result": {"message_id": 7}}))
-        posted = channel.publish(server.address, TOKEN, "@channel", self.files(1), "text", "/upload")
+        posted = channel.publish(server.address, TOKEN, "@channel", self.files(1), "text")
         self.assertEqual(posted, [{"file": "Nagram-00.zip", "message_id": 7}])
         path, payload = server.calls[0]
         self.assertEqual(path, f"/bot{TOKEN}/sendDocument")
@@ -137,7 +140,7 @@ class PublishTest(unittest.TestCase):
             payload,
             {
                 "chat_id": "@channel",
-                "document": "file:///upload/Nagram-00.zip",
+                "document": self.uri("Nagram-00.zip"),
                 "caption": "text",
                 "parse_mode": "HTML",
             },
@@ -145,7 +148,7 @@ class PublishTest(unittest.TestCase):
 
     def test_album_has_the_caption_under_the_last_file(self):
         server = self.serve((200, messages(10, 3)))
-        posted = channel.publish(server.address, TOKEN, "-1001", self.files(3), "text", "/upload/")
+        posted = channel.publish(server.address, TOKEN, "-1001", self.files(3), "text")
         self.assertEqual([entry["message_id"] for entry in posted], [10, 11, 12])
         path, payload = server.calls[0]
         self.assertEqual(path, f"/bot{TOKEN}/sendMediaGroup")
@@ -153,11 +156,11 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(
             payload["media"],
             [
-                {"type": "document", "media": "file:///upload/Nagram-00.zip"},
-                {"type": "document", "media": "file:///upload/Nagram-01.zip"},
+                {"type": "document", "media": self.uri("Nagram-00.zip")},
+                {"type": "document", "media": self.uri("Nagram-01.zip")},
                 {
                     "type": "document",
-                    "media": "file:///upload/Nagram-02.zip",
+                    "media": self.uri("Nagram-02.zip"),
                     "caption": "text",
                     "parse_mode": "HTML",
                 },
@@ -166,15 +169,18 @@ class PublishTest(unittest.TestCase):
 
     def test_more_than_ten_files_make_several_albums(self):
         server = self.serve((200, messages(1, 10)), (200, {"ok": True, "result": {"message_id": 11}}))
-        posted = channel.publish(server.address, TOKEN, "1", self.files(11), "text", "/upload")
+        posted = channel.publish(server.address, TOKEN, "1", self.files(11), "text")
         self.assertEqual(len(posted), 11)
         self.assertEqual([path.rsplit("/", 1)[1] for path, _ in server.calls], ["sendMediaGroup", "sendDocument"])
         self.assertFalse(any("caption" in item for item in server.calls[0][1]["media"]))
         self.assertEqual(server.calls[1][1]["caption"], "text")
 
-    def test_without_a_server_directory_the_own_path_is_used(self):
-        path = self.files(1)[0]
-        self.assertEqual(channel.reference(path, None), path.resolve().as_uri())
+    def test_file_address_is_encoded_for_the_server(self):
+        path = self.root / "Nagram-v12.10.6(7112) 100%.apk"
+        path.write_bytes(b"package")
+        address = channel.reference(path)
+        self.assertTrue(address.startswith("file:///"))
+        self.assertTrue(address.endswith("/Nagram-v12.10.6%287112%29%20100%25.apk"))
 
     def test_flood_wait_is_tried_again(self):
         flood = {"ok": False, "error_code": 429, "description": "Too Many Requests", "parameters": {"retry_after": 5}}
@@ -274,7 +280,7 @@ class PublishTest(unittest.TestCase):
         server = self.serve((200, BOT), (200, messages(20, 2)))
         result = self.root / "result.json"
         status, out, _ = self.run_main(
-            "--api", server.address, "--chat-id", "-1001", "--server-dir", "/upload",
+            "--api", server.address, "--chat-id", "-1001",
             "--title", "Nagram Desktop", "--version", "7.3.0.1", "--hashtag", "desktop",
             "--link", "GitHub Release=https://example.org/r", "--out", str(result),
             *map(str, self.files(2)),
@@ -320,11 +326,11 @@ class PublishTest(unittest.TestCase):
 
     def test_main_dry_run_asks_nothing(self):
         status, out, _ = self.run_main(
-            "--chat-id", "1", "--server-dir", "/upload", "--title", "Nagram", "--version", "1.0",
+            "--chat-id", "1", "--title", "Nagram", "--version", "1.0",
             "--dry-run", str(self.files(1)[0]), token="",
         )
         self.assertEqual(status, 0)
-        self.assertEqual(out, "<b>Nagram</b> <code>1.0</code>\nfile:///upload/Nagram-00.zip\n")
+        self.assertEqual(out, "<b>Nagram</b> <code>1.0</code>\n" + self.uri("Nagram-00.zip") + "\n")
         status, out, _ = self.run_main(
             "--chat-id", "1", "--copy-to", "@official", "--title", "Nagram", "--version", "1.0",
             "--dry-run", str(self.files(1)[0]), token="",

@@ -1,0 +1,71 @@
+# Builds the Bot API server that the channel-publish action runs, from a
+# pinned tdlib/telegram-bot-api commit, and attaches it to a release of
+# this repository. After a run, write the printed release name and SHA-256
+# into BOT_API_RELEASE and BOT_API_SHA256 of channel-publish/action.yml.
+# Rebuild deliberately on upgrades: the server is handed the bot token and
+# every posted file.
+
+name: Bot API binary.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: full 40-hex tdlib/telegram-bot-api commit to build (the project has no tags; take the "Update version to X.Y" commit of a release)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+
+  build:
+    name: Build and release
+    # The action runs the binary on the same system.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Validate the ref.
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Pass a full 40-hex commit, got '$REF'."
+            exit 1
+          fi
+
+      - name: Build.
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ gperf libssl-dev make zlib1g-dev
+          git clone https://github.com/tdlib/telegram-bot-api.git source
+          git -C source checkout "$REF"
+          git -C source submodule update --init --recursive
+          git -C source submodule status --recursive
+          cmake -S source -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/out"
+          # One job per processor: without a number make runs everything
+          # at once and takes all the memory of the runner.
+          cmake --build build --target install --parallel "$(nproc)"
+          strip out/bin/telegram-bot-api
+          cp out/bin/telegram-bot-api telegram-bot-api-linux-x86_64
+          ./telegram-bot-api-linux-x86_64 --version
+
+      - name: Release.
+        env:
+          REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE="telegram-bot-api-$REF"
+          if gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::$RELEASE exists: a published binary is not replaced, its checksum is recorded in the action."
+            exit 1
+          fi
+          gh release create "$RELEASE" telegram-bot-api-linux-x86_64 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Bot API server ${REF::12}" \
+            --notes "telegram-bot-api built from https://github.com/tdlib/telegram-bot-api/commit/$REF on ubuntu-24.04 for the channel-publish action."
+          echo "BOT_API_RELEASE: $RELEASE"
+          echo "BOT_API_SHA256: $(sha256sum telegram-bot-api-linux-x86_64 | cut -d ' ' -f 1)"
