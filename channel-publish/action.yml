@@ -1,5 +1,7 @@
-# Posts the files of a directory to a Telegram channel as documents, with
-# one caption under the last of them. Shared by the Nagram applications:
+# Posts the files of a directory to a Telegram channel, by default as one
+# rich message that holds the title, the notes or the commits, the files
+# and the buttons. Shared by the Nagram applications, which give it their
+# data and get the same layout:
 #   uses: NextAlone/NagramActionRelated/channel-publish@<commit>
 #
 # The files are too large for the public Bot API (50 MB), so the step
@@ -28,22 +30,49 @@ inputs:
     description: The channel, its id or @username.
     required: true
   copy-to:
-    description: Other channels that get a copy of the post, separated by spaces or lines; the files are not sent again.
+    description: Other channels that get the post as well, separated by spaces or lines; the files are not sent again.
   directory:
-    description: Directory whose files are posted, in the order of their names.
+    description: Directory whose files are posted.
     required: true
+  style:
+    description: "'rich' for one rich message, 'album' for documents with a short caption under the last."
+    default: rich
+  kind:
+    description: "'release', or 'test' for a build of a push: a smaller title, sent without a notification."
+    default: release
   title:
-    description: Name of the application, the first words of the caption.
+    description: Name of the application.
   version:
     description: Version shown after the title.
+  build:
+    description: Shown in brackets after the version, such as a commit or a build number.
   hashtags:
-    description: Hashtags of the caption, without '#', separated by spaces.
+    description: Hashtags without '#', separated by spaces.
+  notes-file:
+    description: Markdown notes of the release.
+  notes-en-file:
+    description: English notes, folded under the others.
+  fold-sections:
+    description: Headings of the '## ' sections of the notes to fold, one per line.
+  drop-sections:
+    description: Headings of the '## ' sections of the notes to leave out, one per line.
+  commits-file:
+    description: 'JSON list of commits, [{"id", "message"}] as in a push event; shown grouped by their kind.'
+  repository:
+    description: Address of the repository the commits link to.
+    default: ${{ github.server_url }}/${{ github.repository }}
   body-file:
-    description: Plain text placed under the title; its last lines are dropped when it does not fit.
-  links:
-    description: Links that close the caption, one TEXT=ADDRESS per line.
+    description: Plain text under the title.
+  files-title:
+    description: Heading above the files.
+  folded-files-title:
+    description: Summary of the folded files.
+  files:
+    description: "Order and captions of the files, one 'PATTERN | CAPTION | folded' per line; caption and 'folded' are optional. Files no line matches come last."
+  buttons:
+    description: "Rows of buttons, one row per line: 'TEXT=ADDRESS | TEXT=ADDRESS'. '*' before a text marks the main button; the address {post} is the first post of the files, and such a button is left out of that post."
   caption-file:
-    description: A ready HTML caption, used instead of title, version, hashtags, body and links.
+    description: A ready HTML caption of an album, used instead of the parts above.
 
 outputs:
   messages:
@@ -67,11 +96,23 @@ runs:
         CHAT_ID: ${{ inputs.chat-id }}
         COPY_TO: ${{ inputs.copy-to }}
         DIRECTORY: ${{ inputs.directory }}
+        STYLE: ${{ inputs.style }}
+        KIND: ${{ inputs.kind }}
         TITLE: ${{ inputs.title }}
         VERSION: ${{ inputs.version }}
+        BUILD: ${{ inputs.build }}
         HASHTAGS: ${{ inputs.hashtags }}
+        NOTES_FILE: ${{ inputs.notes-file }}
+        NOTES_EN_FILE: ${{ inputs.notes-en-file }}
+        FOLD_SECTIONS: ${{ inputs.fold-sections }}
+        DROP_SECTIONS: ${{ inputs.drop-sections }}
+        COMMITS_FILE: ${{ inputs.commits-file }}
+        REPOSITORY: ${{ inputs.repository }}
         BODY_FILE: ${{ inputs.body-file }}
-        LINKS: ${{ inputs.links }}
+        FILES_TITLE: ${{ inputs.files-title }}
+        FOLDED_FILES_TITLE: ${{ inputs.folded-files-title }}
+        FILES: ${{ inputs.files }}
+        BUTTONS: ${{ inputs.buttons }}
         CAPTION_FILE: ${{ inputs.caption-file }}
       run: |
         set -euo pipefail
@@ -90,25 +131,42 @@ runs:
         fi
 
         arguments=(--chat-id "$CHAT_ID" --out "$RUNNER_TEMP/channel-messages.json")
+        arguments+=(--style "$STYLE" --kind "$KIND" --repository "$REPOSITORY")
         for chat in $COPY_TO; do
           arguments+=(--copy-to "$chat")
         done
-        if [ -n "$CAPTION_FILE" ]; then
-          arguments+=(--caption-file "$CAPTION_FILE")
-        else
-          arguments+=(--title "$TITLE" --version "$VERSION")
-          for tag in $HASHTAGS; do
-            arguments+=(--hashtag "$tag")
-          done
-          if [ -n "$BODY_FILE" ]; then
-            arguments+=(--body-file "$BODY_FILE")
+        for tag in $HASHTAGS; do
+          arguments+=(--hashtag "$tag")
+        done
+        # An option that takes one value, given when the value is set.
+        single() {
+          if [ -n "$2" ]; then
+            arguments+=("$1" "$2")
           fi
-          while IFS= read -r link; do
-            if [ -n "$link" ]; then
-              arguments+=(--link "$link")
+        }
+        single --title "$TITLE"
+        single --version "$VERSION"
+        single --build "$BUILD"
+        single --notes-file "$NOTES_FILE"
+        single --notes-en-file "$NOTES_EN_FILE"
+        single --commits-file "$COMMITS_FILE"
+        single --body-file "$BODY_FILE"
+        single --files-title "$FILES_TITLE"
+        single --folded-files-title "$FOLDED_FILES_TITLE"
+        single --caption-file "$CAPTION_FILE"
+        # An option given once for every line of the value that is not empty.
+        lines() {
+          local line
+          while IFS= read -r line; do
+            if [ -n "${line//[[:space:]]/}" ]; then
+              arguments+=("$1" "$line")
             fi
-          done <<< "$LINKS"
-        fi
+          done <<< "$2"
+        }
+        lines --fold-section "$FOLD_SECTIONS"
+        lines --drop-section "$DROP_SECTIONS"
+        lines --file-rule "$FILES"
+        lines --button-row "$BUTTONS"
 
         work="$(mktemp -d "$RUNNER_TEMP/bot-api.XXXXXX")"
         server=""

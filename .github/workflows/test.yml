@@ -22,4 +22,6 @@ jobs:
           persist-credentials: false
 
       - name: Action tests.
-        run: python3 channel-publish/test_channel_publish.py
+        run: |
+          python3 channel-publish/test_rich_post.py
+          python3 channel-publish/test_channel_publish.py

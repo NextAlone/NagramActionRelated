@@ -97,11 +97,6 @@ class CaptionTest(unittest.TestCase):
         with self.assertRaises(channel.PublishError):
             channel.caption("Nagram", "1.0", ["two words"])
 
-    def test_links(self):
-        self.assertEqual(channel.parse_link("Release = https://e.org/a=b"), ("Release", "https://e.org/a=b"))
-        for value in ("https://e.org", "=https://e.org", "Release=javascript:1"):
-            with self.assertRaises(channel.PublishError):
-                channel.parse_link(value)
 
 
 class PublishTest(unittest.TestCase):
@@ -276,13 +271,13 @@ class PublishTest(unittest.TestCase):
                 os.environ["CHANNEL_BOT_TOKEN"] = before
         return status, out.getvalue(), err.getvalue()
 
-    def test_main_posts_and_writes_the_messages(self):
+    def test_album_posts_and_writes_the_messages(self):
         server = self.serve((200, BOT), (200, messages(20, 2)))
         result = self.root / "result.json"
         status, out, _ = self.run_main(
-            "--api", server.address, "--chat-id", "-1001",
-            "--title", "Nagram Desktop", "--version", "7.3.0.1", "--hashtag", "desktop",
-            "--link", "GitHub Release=https://example.org/r", "--out", str(result),
+            "--api", server.address, "--style", "album", "--chat-id", "-1001",
+            "--title", "Nagram Desktop", "--version", "7.3.0.1", "--build", "abc1234", "--hashtag", "desktop",
+            "--button-row", "*GitHub Release=https://example.org/r | Assets={post}", "--out", str(result),
             *map(str, self.files(2)),
         )
         self.assertEqual(status, 0)
@@ -294,18 +289,32 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(server.calls[0][0], f"/bot{TOKEN}/getMe")
         self.assertEqual(
             server.calls[1][1]["media"][-1]["caption"],
-            "<b>Nagram Desktop</b> <code>7.3.0.1</code>\n#desktop\n\n"
+            "<b>Nagram Desktop</b> <code>7.3.0.1 (abc1234)</code>\n#desktop\n\n"
             '<a href="https://example.org/r">GitHub Release</a>',
         )
 
-    def test_main_copies_to_the_other_channels(self):
+    def test_album_has_the_subjects_of_the_commits(self):
+        server = self.serve((200, BOT), (200, {"ok": True, "result": {"message_id": 1}}))
+        commits = self.root / "commits.json"
+        commits.write_text(json.dumps([{"id": "a" * 40, "message": "fix: one <thing>\n\nbody"}]), encoding="utf-8")
+        status, _, _ = self.run_main(
+            "--api", server.address, "--style", "album", "--chat-id", "1", "--title", "Nagram",
+            "--version", "1.0", "--commits-file", str(commits), str(self.files(1)[0]),
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            server.calls[1][1]["caption"], "<b>Nagram</b> <code>1.0</code>\n\n• fix: one &lt;thing&gt;"
+        )
+
+    def test_album_copies_to_the_other_channels(self):
         server = self.serve(
             (200, BOT), (200, messages(20, 2)), (200, messages(7, 2)),
             (400, {"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}),
         )
         result = self.root / "result.json"
         status, out, err = self.run_main(
-            "--api", server.address, "--chat-id", "-1001", "--copy-to", "@official", "--copy-to", "@missing",
+            "--api", server.address, "--style", "album", "--chat-id", "-1001",
+            "--copy-to", "@official", "--copy-to", "@missing",
             "--title", "Nagram", "--version", "1.0", "--out", str(result), *map(str, self.files(2)),
         )
         self.assertEqual(status, 1)
@@ -314,41 +323,153 @@ class PublishTest(unittest.TestCase):
         self.assertEqual([entry["message_id"] for entry in json.loads(result.read_text())], [20, 21])
         self.assertEqual([payload.get("chat_id") for _, payload in server.calls[2:]], ["@official", "@missing"])
 
-    def test_main_takes_a_ready_caption(self):
+    def test_album_takes_a_ready_caption(self):
         server = self.serve((200, BOT), (200, {"ok": True, "result": {"message_id": 1}}))
         ready = self.root / "caption.html"
         ready.write_text("<b>Nnngram</b>\n", encoding="utf-8")
         status, _, _ = self.run_main(
-            "--api", server.address, "--chat-id", "1", "--caption-file", str(ready), str(self.files(1)[0])
+            "--api", server.address, "--style", "album", "--chat-id", "1",
+            "--caption-file", str(ready), str(self.files(1)[0]),
         )
         self.assertEqual(status, 0)
         self.assertEqual(server.calls[1][1]["caption"], "<b>Nnngram</b>")
 
-    def test_main_dry_run_asks_nothing(self):
+    def rich_answer(self, message, names):
+        """A posted rich message with its files somewhere inside the blocks."""
+        blocks = [
+            {"type": "details", "blocks": [
+                {"type": "document", "document": {"file_name": name, "file_id": f"id-{name}"}}
+            ]}
+            for name in names
+        ]
+        return {"ok": True, "result": {"message_id": message, "rich_message": {"blocks": blocks}}}
+
+    def test_rich_post_is_one_message_with_the_files(self):
+        names = ["Nagram-00.zip", "Nagram-01.zip"]
+        server = self.serve((200, BOT), (200, self.rich_answer(30, names)))
+        result = self.root / "result.json"
         status, out, _ = self.run_main(
-            "--chat-id", "1", "--title", "Nagram", "--version", "1.0",
-            "--dry-run", str(self.files(1)[0]), token="",
+            "--api", server.address, "--chat-id", "@nagram_assets", "--title", "Nagram Desktop",
+            "--version", "7.3.0.1", "--hashtag", "desktop", "--hashtag", "release",
+            "--files-title", "Download", "--folded-files-title", "Other",
+            "--file-rule", "*-01.zip | Second", "--file-rule", "*-00.zip | First | folded",
+            "--button-row", "*GitHub Release=https://example.org/r", "--button-row", "Assets={post}",
+            "--out", str(result), *map(str, self.files(2)),
         )
         self.assertEqual(status, 0)
-        self.assertEqual(out, "<b>Nagram</b> <code>1.0</code>\n" + self.uri("Nagram-00.zip") + "\n")
+        self.assertIn("rich message 30 in @nagram_assets", out)
+        path, payload = server.calls[1]
+        self.assertEqual(path, f"/bot{TOKEN}/sendRichMessage")
+        self.assertEqual(payload["chat_id"], "@nagram_assets")
+        self.assertNotIn("disable_notification", payload)
+        self.assertEqual(
+            payload["rich_message"]["media"],
+            [
+                {"id": "f0", "media": {"type": "document", "media": self.uri("Nagram-01.zip")}},
+                {"id": "f1", "media": {"type": "document", "media": self.uri("Nagram-00.zip")}},
+            ],
+        )
+        self.assertEqual(
+            payload["rich_message"]["markdown"],
+            "# Nagram Desktop `7.3.0.1`\n\n"
+            "\\#desktop \\#release\n\n"
+            "## Download\n\n"
+            '![](tg://document?id=f0 "Second")\n\n'
+            "<details><summary>Other</summary>\n"
+            '![](tg://document?id=f1 "First")\n'
+            "</details>\n\n"
+            '<tg-button-row align="center">\n'
+            '  <tg-button type="url" style="primary" url="https://example.org/r">GitHub Release</tg-button>\n'
+            "</tg-button-row>\n",
+        )
+        self.assertEqual(
+            json.loads(result.read_text(encoding="utf-8")),
+            [{"file": "Nagram-01.zip", "message_id": 30}, {"file": "Nagram-00.zip", "message_id": 30}],
+        )
+
+    def test_rich_post_is_repeated_with_the_files_it_has(self):
+        names = ["Nagram-00.zip", "Nagram-01.zip"]
+        server = self.serve((200, BOT), (200, self.rich_answer(30, names)), (200, self.rich_answer(5, names)))
+        status, out, _ = self.run_main(
+            "--api", server.address, "--chat-id", "@nagram_assets", "--copy-to", "@official",
+            "--title", "Nagram", "--version", "1.0", "--button-row", "Assets={post}",
+            *map(str, self.files(2)),
+        )
+        self.assertEqual(status, 0)
+        first, second = server.calls[1][1], server.calls[2][1]
+        self.assertNotIn("tg-button", first["rich_message"]["markdown"])
+        self.assertEqual(second["chat_id"], "@official")
+        self.assertIn('url="https://t.me/nagram_assets/30">Assets<', second["rich_message"]["markdown"])
+        self.assertEqual(
+            second["rich_message"]["media"],
+            [
+                {"id": "f0", "media": {"type": "document", "media": "id-Nagram-00.zip"}},
+                {"id": "f1", "media": {"type": "document", "media": "id-Nagram-01.zip"}},
+            ],
+        )
+
+    def test_rich_post_that_does_not_name_its_files_is_not_repeated(self):
+        server = self.serve((200, BOT), (200, self.rich_answer(30, ["Nagram-00.zip"])))
+        result = self.root / "result.json"
+        status, _, err = self.run_main(
+            "--api", server.address, "--chat-id", "1", "--copy-to", "2", "--title", "Nagram",
+            "--version", "1.0", "--out", str(result), *map(str, self.files(2)),
+        )
+        self.assertEqual(status, 1)
+        self.assertIn("Nagram-01.zip", err)
+        self.assertEqual(len(server.calls), 2)
+        self.assertEqual(len(json.loads(result.read_text(encoding="utf-8"))), 2)
+
+    def test_rich_test_build_is_silent_and_lists_the_commits(self):
+        server = self.serve((200, BOT), (200, self.rich_answer(8, ["Nagram-00.zip"])))
+        commits = self.root / "commits.json"
+        commits.write_text(json.dumps([{"id": "abcdef0123", "message": "fix: one"}]), encoding="utf-8")
+        status, _, _ = self.run_main(
+            "--api", server.address, "--chat-id", "1", "--kind", "test", "--title", "Nagram",
+            "--version", "1.0", "--build", "abcdef0", "--commits-file", str(commits),
+            "--repository", "https://example.org/repo", str(self.files(1)[0]),
+        )
+        self.assertEqual(status, 0)
+        payload = server.calls[1][1]
+        self.assertIs(payload["disable_notification"], True)
+        self.assertEqual(
+            payload["rich_message"]["markdown"],
+            "### Nagram `1.0` \\(abcdef0\\)\n\n"
+            "**🔧 Fixes**\n- [`abcdef0`](https://example.org/repo/commit/abcdef0123) fix: one\n\n"
+            "![](tg://document?id=f0)\n",
+        )
+
+    def test_main_dry_run_asks_nothing(self):
         status, out, _ = self.run_main(
             "--chat-id", "1", "--copy-to", "@official", "--title", "Nagram", "--version", "1.0",
             "--dry-run", str(self.files(1)[0]), token="",
         )
         self.assertEqual(status, 0)
-        self.assertTrue(out.endswith("copy to @official\n"))
+        self.assertEqual(out, "# Nagram `1.0`\n\n![](tg://document?id=f0)\nNagram-00.zip\nalso to @official\n")
+        status, out, _ = self.run_main(
+            "--style", "album", "--chat-id", "1", "--title", "Nagram", "--version", "1.0",
+            "--dry-run", str(self.files(1)[0]), token="",
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(out, "<b>Nagram</b> <code>1.0</code>\nNagram-00.zip\n")
 
     def test_main_failures(self):
         path = str(self.files(1)[0])
+        notes = self.root / "notes.md"
+        notes.write_text("Intro.\n\n## New\n\n- one\n", encoding="utf-8")
+        named = ("--chat-id", "1", "--title", "Nagram", "--version", "1.0")
         for arguments, token, message in (
-            (("--chat-id", "1", path), TOKEN, "--caption-file"),
-            (("--chat-id", "1", "--title", "Nagram", "--version", "1.0", path), "", "CHANNEL_BOT_TOKEN"),
-            (("--chat-id", "1", "--title", "Nagram", "--version", "1.0", "missing.zip"), TOKEN, "not a file"),
+            (("--chat-id", "1", path), TOKEN, "--title and --version"),
+            (("--chat-id", "1", "--caption-file", str(notes), path), TOKEN, "--title and --version"),
+            ((*named, path), "", "CHANNEL_BOT_TOKEN"),
+            ((*named, "missing.zip"), TOKEN, "not a file"),
+            ((*named, "--button-row", "no address", path), TOKEN, "not a button"),
+            ((*named, "--file-rule", "*.zip | a | b", path), TOKEN, "not a file rule"),
+            ((*named, "--commits-file", str(notes), path), TOKEN, "is not JSON"),
         ):
             status, _, err = self.run_main(*arguments, token=token)
-            self.assertEqual(status, 1)
+            self.assertEqual(status, 1, arguments)
             self.assertIn(message, err)
-
 
 if __name__ == "__main__":
     unittest.main()
