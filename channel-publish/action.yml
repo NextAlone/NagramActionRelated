@@ -59,8 +59,8 @@ runs:
       env:
         # The release of this repository that holds the server and the
         # SHA-256 of the binary; bot-api-binary.yml prints both.
-        BOT_API_RELEASE: ""
-        BOT_API_SHA256: ""
+        BOT_API_RELEASE: telegram-bot-api-2efabc722e9493b9cac450233198d09e5cea0573
+        BOT_API_SHA256: 54c2b3772b15d98f04042603b63c7b0a3fecf113394a58cda5b9a995e5dfb5a6
         CHANNEL_BOT_TOKEN: ${{ inputs.bot-token }}
         TELEGRAM_API_ID: ${{ inputs.api-id }}
         TELEGRAM_API_HASH: ${{ inputs.api-hash }}
