@@ -1,0 +1,56 @@
+# Builds the Bot API server image that the channel-publish action runs,
+# from a pinned tdlib/telegram-bot-api commit, and pushes it to the owner's
+# GHCR. After a run, set the variable NAGRAM_BOT_API_IMAGE to the printed
+# digest-pinned reference in every repository that uses the action, and
+# make the package public for them to pull it. Rebuild deliberately on
+# upgrades: the container is handed the bot token and every posted file.
+
+name: Bot API image.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: full 40-hex tdlib/telegram-bot-api commit to build (the project has no tags; take the "Update version to X.Y" commit of a release)
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+
+  build:
+    name: Build and push
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Validate the ref.
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Pass a full 40-hex commit, got '$REF'."
+            exit 1
+          fi
+
+      - name: Clone.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and push.
+        env:
+          REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # GHCR names are lowercase, the owner's name need not be.
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telegram-bot-api"
+          docker build \
+            --build-arg "TELEGRAM_BOT_API_REF=$REF" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            -t "$IMAGE:$REF" telegram-bot-api
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$REF"
+          echo "Set the variable NAGRAM_BOT_API_IMAGE to:"
+          docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$REF"
