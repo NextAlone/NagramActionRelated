@@ -220,6 +220,29 @@ class PublishTest(unittest.TestCase):
             channel.wait_ready(server.address, TOKEN)
         self.assertIn("Unauthorized", str(raised.exception))
 
+    def test_copy_keeps_the_order_of_the_messages(self):
+        server = self.serve((200, messages(40, 3)))
+        posted = [{"file": name, "message_id": n} for name, n in (("b", 12), ("a", 10), ("c", 11))]
+        copied = channel.copy(server.address, TOKEN, "-1001", "@official", posted)
+        self.assertEqual(copied, [40, 41, 42])
+        path, payload = server.calls[0]
+        self.assertEqual(path, f"/bot{TOKEN}/copyMessages")
+        self.assertEqual(
+            payload, {"chat_id": "@official", "from_chat_id": "-1001", "message_ids": [10, 11, 12]}
+        )
+
+    def test_copy_of_more_than_a_hundred_messages(self):
+        server = self.serve((200, messages(500, 100)), (200, messages(600, 1)))
+        posted = [{"file": str(n), "message_id": n} for n in range(1, 102)]
+        copied = channel.copy(server.address, TOKEN, "1", "2", posted)
+        self.assertEqual(len(copied), 101)
+        self.assertEqual(server.calls[1][1]["message_ids"], [101])
+
+    def test_copy_answer_without_the_messages(self):
+        server = self.serve((200, messages(1, 1)))
+        with self.assertRaises(channel.PublishError):
+            channel.copy(server.address, TOKEN, "1", "2", [{"file": "a", "message_id": 1}, {"file": "b", "message_id": 2}])
+
     def test_file_checks(self):
         (self.root / "empty.zip").write_bytes(b"")
         other = self.root / "other"
@@ -269,6 +292,22 @@ class PublishTest(unittest.TestCase):
             '<a href="https://example.org/r">GitHub Release</a>',
         )
 
+    def test_main_copies_to_the_other_channels(self):
+        server = self.serve(
+            (200, BOT), (200, messages(20, 2)), (200, messages(7, 2)),
+            (400, {"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}),
+        )
+        result = self.root / "result.json"
+        status, out, err = self.run_main(
+            "--api", server.address, "--chat-id", "-1001", "--copy-to", "@official", "--copy-to", "@missing",
+            "--title", "Nagram", "--version", "1.0", "--out", str(result), *map(str, self.files(2)),
+        )
+        self.assertEqual(status, 1)
+        self.assertIn("copied to @official: messages 7, 8", out)
+        self.assertIn("chat not found", err)
+        self.assertEqual([entry["message_id"] for entry in json.loads(result.read_text())], [20, 21])
+        self.assertEqual([payload.get("chat_id") for _, payload in server.calls[2:]], ["@official", "@missing"])
+
     def test_main_takes_a_ready_caption(self):
         server = self.serve((200, BOT), (200, {"ok": True, "result": {"message_id": 1}}))
         ready = self.root / "caption.html"
@@ -286,6 +325,12 @@ class PublishTest(unittest.TestCase):
         )
         self.assertEqual(status, 0)
         self.assertEqual(out, "<b>Nagram</b> <code>1.0</code>\nfile:///upload/Nagram-00.zip\n")
+        status, out, _ = self.run_main(
+            "--chat-id", "1", "--copy-to", "@official", "--title", "Nagram", "--version", "1.0",
+            "--dry-run", str(self.files(1)[0]), token="",
+        )
+        self.assertEqual(status, 0)
+        self.assertTrue(out.endswith("copy to @official\n"))
 
     def test_main_failures(self):
         path = str(self.files(1)[0])

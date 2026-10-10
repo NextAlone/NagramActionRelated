@@ -11,9 +11,13 @@ under the last one. The caption is either a ready HTML file or is put
 together here from a title, a version, hashtags, a plain text body and
 links; a body that does not fit loses its last lines.
 
+A post can be repeated in other channels with --copy-to: the messages
+are copied there by the server, as posts of those channels and without
+sending the files again.
+
 The bot token is read from CHANNEL_BOT_TOKEN. The posted messages are
 written to --out as JSON, [{"file": <name>, "message_id": <id>}], for the
-steps that record them elsewhere.
+steps that record them elsewhere; the copies are not in it.
 """
 
 import argparse
@@ -28,6 +32,7 @@ import urllib.request
 from pathlib import Path
 
 ALBUM = 10
+COPY = 100
 CAPTION_LIMIT = 1024
 SIZE_LIMIT = 2000 * 1024 * 1024
 HASHTAG = re.compile(r"\w+")
@@ -201,10 +206,30 @@ def publish(api, token, chat, paths, text, server_dir=None, sleep=time.sleep):
     return posted
 
 
+def copy(api, token, source, target, posted, sleep=time.sleep):
+    """Copy the posted messages to another channel; returns the new ids."""
+    ids = sorted(entry["message_id"] for entry in posted)
+    copied = []
+    for start in range(0, len(ids), COPY):
+        part = ids[start:start + COPY]
+        payload = {"chat_id": target, "from_chat_id": source, "message_ids": part}
+        result = call(api, token, "copyMessages", payload, sleep=sleep)
+        if not isinstance(result, list) or len(result) != len(part) or not all(
+            isinstance(message, dict) and isinstance(message.get("message_id"), int)
+            for message in result
+        ):
+            raise PublishError(f"the server answered without the {len(part)} copied messages")
+        copied.extend(message["message_id"] for message in result)
+    print(f"copied to {target}: messages {', '.join(map(str, copied))}", flush=True)
+    return copied
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--api", default="http://127.0.0.1:8081", help="the Bot API server")
     parser.add_argument("--chat-id", required=True, help="the channel: its id or @username")
+    parser.add_argument("--copy-to", action="append", default=[], metavar="CHAT",
+                        help="another channel that gets a copy of the post")
     parser.add_argument("--server-dir", help="where the server sees the directory of the files")
     parser.add_argument("--title", help="the name of the application")
     parser.add_argument("--version")
@@ -231,6 +256,8 @@ def main(argv=None):
             print(text)
             for path in paths:
                 print(reference(path, args.server_dir))
+            for target in args.copy_to:
+                print(f"copy to {target}")
             return 0
         token = os.environ.get("CHANNEL_BOT_TOKEN", "")
         if not token:
@@ -238,11 +265,14 @@ def main(argv=None):
         bot = wait_ready(args.api, token)
         print(f"Posting as @{bot.get('username')} to {args.chat_id}.", flush=True)
         posted = publish(args.api, token, args.chat_id, paths, text, args.server_dir)
+        # Written before the copies: a failing copy must not hide the post.
+        if args.out:
+            Path(args.out).write_text(json.dumps(posted) + "\n", encoding="utf-8")
+        for target in args.copy_to:
+            copy(args.api, token, args.chat_id, target, posted)
     except (PublishError, OSError) as error:
         print(error, file=sys.stderr)
         return 1
-    if args.out:
-        Path(args.out).write_text(json.dumps(posted) + "\n", encoding="utf-8")
     return 0
 
 

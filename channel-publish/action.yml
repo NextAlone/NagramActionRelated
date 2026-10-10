@@ -30,6 +30,8 @@ inputs:
   chat-id:
     description: The channel, its id or @username.
     required: true
+  copy-to:
+    description: Other channels that get a copy of the post, separated by spaces or lines; the files are not sent again.
   directory:
     description: Directory whose files are posted, in the order of their names.
     required: true
@@ -65,6 +67,7 @@ runs:
         IMAGE: ${{ inputs.image }}
         REGISTRY_TOKEN: ${{ inputs.registry-token }}
         CHAT_ID: ${{ inputs.chat-id }}
+        COPY_TO: ${{ inputs.copy-to }}
         DIRECTORY: ${{ inputs.directory }}
         TITLE: ${{ inputs.title }}
         VERSION: ${{ inputs.version }}
@@ -93,6 +96,9 @@ runs:
         chmod a+r "${files[@]}"
 
         arguments=(--chat-id "$CHAT_ID" --server-dir /upload --out "$RUNNER_TEMP/channel-messages.json")
+        for chat in $COPY_TO; do
+          arguments+=(--copy-to "$chat")
+        done
         if [ -n "$CAPTION_FILE" ]; then
           arguments+=(--caption-file "$CAPTION_FILE")
         else

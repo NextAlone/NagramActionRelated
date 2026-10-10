@@ -35,6 +35,7 @@ Build packages are larger than the 50 MB the public Bot API accepts, so the acti
 | `image` | The Bot API server image, `ghcr.io/<owner>/telegram-bot-api@sha256:<digest>`. |
 | `registry-token` | Token to pull the image with, when the package is not public. |
 | `chat-id` | The channel, its id or `@username`. |
+| `copy-to` | Other channels that get a copy of the post, separated by spaces or lines. The server copies the messages, the files are not sent again. |
 | `directory` | Directory whose files are posted, in the order of their names. |
 | `title`, `version` | The first line of the caption. |
 | `hashtags` | Hashtags without `#`, separated by spaces. |
@@ -42,7 +43,7 @@ Build packages are larger than the 50 MB the public Bot API accepts, so the acti
 | `links` | Links that close the caption, one `TEXT=ADDRESS` per line. |
 | `caption-file` | A ready HTML caption, used instead of the five inputs above. |
 
-The output `messages` is JSON, `[{"file": <name>, "message_id": <id>}]`, for steps that record the posted messages elsewhere, such as the metadata an in-app updater reads.
+The output `messages` is JSON, `[{"file": <name>, "message_id": <id>}]`, for steps that record the posted messages elsewhere, such as the metadata an in-app updater reads. It lists the messages in `chat-id`, not the copies.
 
 Only a flood wait is retried. After any other failure the post may have gone through, so the step fails instead of sending it again.
 
