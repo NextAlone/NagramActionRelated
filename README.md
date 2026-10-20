@@ -79,7 +79,7 @@ A build of a push, with the commits it brings:
 | `api-id`, `api-hash` | Telegram API credentials the Bot API server runs with. |
 | `chat-id` | The channel, its id or `@username`. |
 | `copy-to` | Other channels that get the post as well, separated by spaces or lines. The files are not sent again. |
-| `directory` | Directory whose files are posted. |
+| `directory` | Directory whose files are posted; it must hold at least one. Without it a rich message of text alone is posted, for a release that has no files to give, such as one submitted to an app store. |
 | `style` | `rich` (default) for one rich message; `album` for documents in albums of up to ten with a short caption under the last, for the clients and the cases a rich message does not suit. |
 | `kind` | `release` (default), or `test` for a build of a push: a smaller title, sent without a notification. |
 | `title`, `version`, `build` | The heading: the name, the version, and what is shown in brackets after it. |

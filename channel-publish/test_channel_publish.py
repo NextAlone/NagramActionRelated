@@ -439,6 +439,36 @@ class PublishTest(unittest.TestCase):
             "![](tg://document?id=f0)\n",
         )
 
+    def test_rich_post_without_files_is_text_alone(self):
+        server = self.serve((200, BOT), (200, self.rich_answer(40, [])), (200, self.rich_answer(6, [])))
+        notes = self.root / "notes.md"
+        notes.write_text("Submitted for review.\n\n## New\n\n- one\n", encoding="utf-8")
+        result = self.root / "result.json"
+        status, _, _ = self.run_main(
+            "--api", server.address, "--chat-id", "@nagram_assets", "--copy-to", "@official",
+            "--title", "Nagram", "--version", "1.0", "--build", "7", "--hashtag", "release",
+            "--notes-file", str(notes), "--files-title", "Download",
+            "--button-row", "*App Store=https://example.org/app", "--button-row", "Post={post}",
+            "--out", str(result),
+        )
+        self.assertEqual(status, 0)
+        first, second = server.calls[1][1], server.calls[2][1]
+        self.assertEqual(first["rich_message"]["media"], [])
+        self.assertEqual(
+            first["rich_message"]["markdown"],
+            "# Nagram `1.0` \\(7\\)\n\n"
+            "\\#release\n\n"
+            "Submitted for review.\n\n"
+            "## New\n\n- one\n\n"
+            '<tg-button-row align="center">\n'
+            '  <tg-button type="url" style="primary" url="https://example.org/app">App Store</tg-button>\n'
+            "</tg-button-row>\n",
+        )
+        self.assertEqual(second["chat_id"], "@official")
+        self.assertEqual(second["rich_message"]["media"], [])
+        self.assertIn('url="https://t.me/nagram_assets/40">Post<', second["rich_message"]["markdown"])
+        self.assertEqual(json.loads(result.read_text(encoding="utf-8")), [])
+
     def test_main_dry_run_asks_nothing(self):
         status, out, _ = self.run_main(
             "--chat-id", "1", "--copy-to", "@official", "--title", "Nagram", "--version", "1.0",
@@ -466,6 +496,7 @@ class PublishTest(unittest.TestCase):
             ((*named, "--button-row", "no address", path), TOKEN, "not a button"),
             ((*named, "--file-rule", "*.zip | a | b", path), TOKEN, "not a file rule"),
             ((*named, "--commits-file", str(notes), path), TOKEN, "is not JSON"),
+            (("--style", "album", *named), TOKEN, "an album needs files"),
         ):
             status, _, err = self.run_main(*arguments, token=token)
             self.assertEqual(status, 1, arguments)

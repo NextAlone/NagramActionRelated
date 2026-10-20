@@ -211,7 +211,9 @@ def file_line(key, caption):
 
 
 def files_block(files, title="", folded_title=""):
-    """The files as blocks; files is [(key, caption, folded)]."""
+    """The files as blocks; files is [(key, caption, folded)]. No files, no title."""
+    if not files:
+        return ""
     shown = [file_line(key, caption) for key, caption, folded in files if not folded]
     folded = [file_line(key, caption) for key, caption, folded in files if folded]
     blocks = []

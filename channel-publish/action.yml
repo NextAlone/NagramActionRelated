@@ -32,8 +32,7 @@ inputs:
   copy-to:
     description: Other channels that get the post as well, separated by spaces or lines; the files are not sent again.
   directory:
-    description: Directory whose files are posted.
-    required: true
+    description: Directory whose files are posted. Without it a rich message of text alone is posted.
   style:
     description: "'rich' for one rich message, 'album' for documents with a short caption under the last."
     default: rich
@@ -121,13 +120,17 @@ runs:
           exit 1
         fi
 
+        # A directory that is given must hold files: an empty one is a build
+        # that lost its output, not a post of text alone.
         files=()
-        while IFS= read -r -d '' file; do
-          files+=("$file")
-        done < <(find "$(realpath "$DIRECTORY")" -maxdepth 1 -type f -print0 | sort -z)
-        if [ ${#files[@]} -eq 0 ]; then
-          echo "::error::$DIRECTORY has no files to post."
-          exit 1
+        if [ -n "$DIRECTORY" ]; then
+          while IFS= read -r -d '' file; do
+            files+=("$file")
+          done < <(find "$(realpath "$DIRECTORY")" -maxdepth 1 -type f -print0 | sort -z)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::$DIRECTORY has no files to post."
+            exit 1
+          fi
         fi
 
         arguments=(--chat-id "$CHAT_ID" --out "$RUNNER_TEMP/channel-messages.json")

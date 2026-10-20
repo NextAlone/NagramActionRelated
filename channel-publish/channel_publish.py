@@ -9,7 +9,8 @@ There are two styles. 'rich' sends one rich message that holds the title,
 the notes or the commits, the files and the buttons; rich_post.py describes
 its layout. 'album' sends the files as documents, in albums of up to ten,
 with a short HTML caption under the last one, for the clients and the
-cases a rich message does not suit.
+cases a rich message does not suit. A rich message can also be posted
+without files, for an announcement of a release that has none to give.
 
 A post can be repeated in other channels with --copy-to without sending
 the files again: a rich message is sent anew with the files it already
@@ -367,11 +368,13 @@ def main(argv=None):
     parser.add_argument("--caption-file", help="a ready HTML caption of an album")
     parser.add_argument("--out", help="write the posted messages here as JSON")
     parser.add_argument("--dry-run", action="store_true", help="print the text and the files")
-    parser.add_argument("files", nargs="+")
+    parser.add_argument("files", nargs="*")
     args = parser.parse_args(argv)
     try:
         paths = [Path(name) for name in args.files]
         check_files(paths)
+        if not paths and args.style == "album":
+            raise PublishError("an album needs files, a post without them is a rich message")
         if not (args.title and args.version) and not (args.style == "album" and args.caption_file):
             raise PublishError("give --title and --version")
         # The text is put together before anything is asked of the server,
