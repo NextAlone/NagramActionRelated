@@ -87,7 +87,7 @@ A build of a push, with the commits it brings:
 | `notes-file` | Markdown notes of the release, sent as they are. A version of four parts is set in code style, because a client takes it for an IP address. |
 | `notes-en-file` | English notes, folded under the others. |
 | `fold-sections`, `drop-sections` | Headings of the `## ` sections of the notes to fold or to leave out, one per line. A heading the notes do not have is passed over. |
-| `commits-file` | JSON list of commits, `[{"id", "message"}]` as in a push event. They are shown grouped by their Conventional Commits kind and linked to `repository`; past forty only a count is left. A `Setting-Path: <path> \| <address>` trailer is shown under its commit. |
+| `commits-file` | JSON list of commits, `[{"id", "message"}]` as in a push event. They are shown grouped by their Conventional Commits kind and linked to `repository`; past forty only a count is left. A `Setting-Path: <path> \| <address>` trailer is shown under its commit. The body of a commit is folded under it without the trailers that end it, cut past 1000 characters; past 16000 characters of bodies the later commits are shown without theirs. |
 | `repository` | Address of the repository the commits link to; the calling repository by default. |
 | `body-file` | Plain text under the title. |
 | `files-title`, `folded-files-title` | Heading above the files and summary of the folded ones. |

@@ -101,7 +101,8 @@ class CommitsTest(unittest.TestCase):
         self.assertEqual(
             post.commits_block(commits, "https://e.org/r/"),
             "**✨ Features**\n- [`3333333`](https://e.org/r/commit/3333333cccc) FEAT!: two\n\n"
-            "**🔧 Fixes**\n- [`2222222`](https://e.org/r/commit/2222222bbbb) fix\\(ui\\): one\n\n"
+            "**🔧 Fixes**\n- [`2222222`](https://e.org/r/commit/2222222bbbb) fix\\(ui\\): one\n"
+            "  <details><summary>Details</summary>\n  body\n  </details>\n\n"
             "**♻️ Refactor**\n- [`6666666`](https://e.org/r/commit/6666666ffff) refa: four\n\n"
             "**🧹 Chore**\n- [`1111111`](https://e.org/r/commit/1111111aaaa) chore: three\n\n"
             "**🔀 Merge**\n- [`4444444`](https://e.org/r/commit/4444444dddd) Merge branch 'x'\n\n"
@@ -120,6 +121,40 @@ class CommitsTest(unittest.TestCase):
             "  - ↳ [Chats \\> Quick reply](tg://nnn/chat?r=quick)\n"
             "  - ↳ Plain",
         )
+
+    def test_body_is_folded_without_its_trailers(self):
+        message = (
+            "feat: qr codes\n\n新增 QR 码支持 <b>\n实现扫描 #1\n\n"
+            "thanks to @Nekogram\n\n"
+            "Setting-Path: Chats\n"
+            "Co-authored-by: a <a@e.org>\nCo-Authored-By: b <b@e.org>"
+        )
+        self.assertEqual(
+            post.commits_block([{"id": "abcdef0123", "message": message}]),
+            "**✨ Features**\n- `abcdef0` feat: qr codes\n"
+            "  - ↳ Chats\n"
+            "  <details><summary>Details</summary>\n"
+            "  新增 QR 码支持 &lt;b\\>\n  实现扫描 \\#1\n\n  thanks to @Nekogram\n"
+            "  </details>",
+        )
+
+    def test_trailers_sharing_the_last_paragraph_are_dropped(self):
+        commit = post.parse_commit({"message": "fix: a\n\nthanks to @x\nCo-authored-by: y <y@e.org>"})
+        self.assertEqual(commit["body"], "thanks to @x")
+
+    def test_trailers_alone_leave_no_body(self):
+        message = "fix: a\n\nSigned-off-by: y <y@e.org>\nSetting-Path: Chats"
+        self.assertEqual(post.parse_commit({"message": message})["body"], "")
+        self.assertEqual(post.commits_block([{"message": message}]), "**🔧 Fixes**\n- fix: a\n  - ↳ Chats")
+
+    def test_long_bodies_are_cut_and_kept_within_the_budget(self):
+        long = {"message": "fix: a\n\n" + "x" * (post.BODY_LIMIT + 50)}
+        self.assertIn("x" * post.BODY_LIMIT + "…", post.commits_block([long]))
+        block = post.commits_block([long] * post.COMMITS_SHOWN)
+        folded = block.count("<details>")
+        self.assertGreater(folded, 0)
+        self.assertLess(folded, post.COMMITS_SHOWN)
+        self.assertLessEqual(len(block), post.BODIES_BUDGET + post.COMMITS_SHOWN * 20)
 
     def test_many_commits_end_with_a_count(self):
         commits = [{"id": f"{n:07}", "message": f"fix: {n}"} for n in range(post.COMMITS_SHOWN + 3)]

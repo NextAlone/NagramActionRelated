@@ -25,6 +25,11 @@ from fnmatch import fnmatchcase
 
 TEXT_LIMIT = 32768
 COMMITS_SHOWN = 40
+# The body of a commit is folded under it; a long one is cut, and past the
+# budget of all bodies the later commits are shown without theirs.
+BODY_LIMIT = 1000
+BODIES_BUDGET = 16000
+BODY_SUMMARY = "Details"
 POST = "{post}"
 
 # Conventional Commits kinds in the order they are shown.
@@ -47,6 +52,8 @@ KINDS = {name: key for key, _, names in GROUPS for name in names}
 SUBJECT = re.compile(r"(?P<kind>[A-Za-z]+)(?:\([^)]*\))?!?:\s*.+")
 # A trailer naming where the setting of a feature is: "<path>" or "<path> | <address>".
 SETTING = re.compile(r"\s*Setting-Path\s*:\s*(.+?)\s*", re.IGNORECASE)
+# A git trailer, such as "Co-authored-by: ..."; those ending the body are not shown.
+TRAILER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*\s*:\s*\S.*")
 # The marks a backslash makes literal; before any other one it would stay in the text.
 MARKS = re.compile(r"([\\`*_\[\]()#~=$|>])")
 # A four-part version is taken for an IP address and made a link.
@@ -97,6 +104,27 @@ def notes_blocks(notes, fold=(), drop=()):
     return blocks
 
 
+def commit_body(lines):
+    """The body of a commit without its Setting-Path lines and its trailers."""
+    paragraphs = []
+    for line in lines:
+        if SETTING.fullmatch(line):
+            continue
+        if line.strip():
+            if not paragraphs or paragraphs[-1] is None:
+                paragraphs.append([])
+            paragraphs[-1].append(line.rstrip())
+        elif paragraphs and paragraphs[-1] is not None:
+            paragraphs.append(None)
+    paragraphs = [paragraph for paragraph in paragraphs if paragraph]
+    while paragraphs and TRAILER.fullmatch(paragraphs[-1][-1].strip()):
+        paragraphs[-1].pop()
+        if not paragraphs[-1]:
+            paragraphs.pop()
+            break
+    return "\n\n".join("\n".join(paragraph) for paragraph in paragraphs)
+
+
 def parse_commit(entry):
     """A commit of a push event, {"id", "message"}, as what is shown of it."""
     if not isinstance(entry, dict) or not isinstance(entry.get("message"), str):
@@ -117,7 +145,21 @@ def parse_commit(entry):
     else:
         kind = "other"
     sha = entry.get("id") or entry.get("sha") or ""
-    return {"sha": sha if isinstance(sha, str) else "", "subject": subject, "kind": kind, "settings": settings}
+    return {
+        "sha": sha if isinstance(sha, str) else "",
+        "subject": subject,
+        "kind": kind,
+        "settings": settings,
+        "body": commit_body(lines[1:]),
+    }
+
+
+def body_details(body):
+    """A commit body folded under its list item, indented to stay in it."""
+    if len(body) > BODY_LIMIT:
+        body = body[:BODY_LIMIT].rstrip() + "…"
+    text = details(BODY_SUMMARY, "\n".join(escape(line) for line in body.split("\n")))
+    return "\n".join(f"  {line}" if line else "" for line in text.split("\n"))
 
 
 def commits_block(entries, repository=""):
@@ -125,10 +167,17 @@ def commits_block(entries, repository=""):
     commits = [parse_commit(entry) for entry in entries]
     commits = [commit for commit in commits if commit["subject"]]
     shown, hidden = commits[:COMMITS_SHOWN], len(commits) - COMMITS_SHOWN
+    folded, budget = {}, BODIES_BUDGET
+    for index, commit in enumerate(shown):
+        if commit["body"]:
+            text = body_details(commit["body"])
+            if len(text) > budget:
+                break
+            folded[index], budget = text, budget - len(text)
     blocks = []
     for key, label, _ in GROUPS:
         lines = []
-        for commit in shown:
+        for index, commit in enumerate(shown):
             if commit["kind"] != key:
                 continue
             short = commit["sha"][:7]
@@ -140,6 +189,8 @@ def commits_block(entries, repository=""):
             for path, address in commit["settings"]:
                 where = f"[{escape(path)}]({address})" if ADDRESS.fullmatch(address) else escape(path)
                 lines.append(f"  - ↳ {where}")
+            if index in folded:
+                lines.append(folded[index])
         if lines:
             blocks.append(f"**{label}**\n" + "\n".join(lines))
     if hidden > 0:
