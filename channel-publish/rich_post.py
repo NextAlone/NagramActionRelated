@@ -79,8 +79,19 @@ def escape(text):
     return MARKS.sub(r"\\\1", text.replace("&", "&amp;").replace("<", "&lt;"))
 
 
+# Code a version is left alone in: a fenced block or an inline code span.
+CODE = re.compile(r"^```.*?^```[ \t]*$|`[^`\n]*`", re.MULTILINE | re.DOTALL)
+
+
 def plain_versions(text):
-    return VERSION.sub(r"`\1`", text)
+    """Four-part versions outside code set in code style."""
+    parts, last = [], 0
+    for match in CODE.finditer(text):
+        parts.append(VERSION.sub(r"`\1`", text[last:match.start()]))
+        parts.append(match.group(0))
+        last = match.end()
+    parts.append(VERSION.sub(r"`\1`", text[last:]))
+    return "".join(parts)
 
 
 def sections(notes):

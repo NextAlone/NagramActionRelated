@@ -40,6 +40,13 @@ class TextTest(unittest.TestCase):
             "Nagram `7.3.0.1`, [7.2.10.3](https://e.org/v7.2.10.3), `1.2.3.4`, 12.10.6, 1.2.3.4.5, `7.3.0.2`.",
         )
 
+    def test_versions_in_code_are_left_alone(self):
+        text = "Get `Nagram-7.4.1.3-macos.zip`:\n\n```bash\nsudo dnf install ./Nagram-7.4.1.3-linux.rpm\n```\n\nthen 7.4.1.3."
+        self.assertEqual(
+            post.plain_versions(text),
+            "Get `Nagram-7.4.1.3-macos.zip`:\n\n```bash\nsudo dnf install ./Nagram-7.4.1.3-linux.rpm\n```\n\nthen `7.4.1.3`.",
+        )
+
     def test_heading(self):
         self.assertEqual(post.heading("Nagram Desktop", "7.3.0.1"), "## Nagram Desktop v7.3.0.1")
         self.assertEqual(post.heading("Nagram", "v12.10.6", "7112", "🚀"), "## 🚀 Nagram v12.10.6 \\(7112\\)")
