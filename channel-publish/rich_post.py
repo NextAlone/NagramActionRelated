@@ -2,17 +2,21 @@
 
 Every application gets the same skeleton:
 
-    # <title> `<version>` (<build>)
-    #hashtags
-
-    <notes, with chosen sections folded or dropped>
-    <English notes, folded>
-    <commits, grouped by their kind>
+    ## <emoji> <title> v<version> (<build>)
+    <text>
 
     ## <files title>
     <files with their captions; the less wanted ones folded>
 
+    ---
+    **<changelog title>**
+    > <notes, with chosen sections folded or dropped>
+    > <English notes, folded>
+    > <commits, grouped by their kind>
+
     <rows of buttons>
+
+    #hashtags
 
 A file is a link tg://document?id=<id>, the id names it in the media of
 the message. A button whose address is {post} points to the first post of
@@ -31,6 +35,9 @@ BODY_LIMIT = 1000
 BODIES_BUDGET = 16000
 BODY_SUMMARY = "Details"
 POST = "{post}"
+CHANGELOG_TITLE = "更新日志 | Changelog"
+# The styles of a button: "*" before its text is primary, "<style>:" any of these.
+BUTTON_STYLES = ("primary", "success", "danger", "link")
 
 # Conventional Commits kinds in the order they are shown.
 GROUPS = (
@@ -59,6 +66,7 @@ MARKS = re.compile(r"([\\`*_\[\]()#~=$|>])")
 # A four-part version is taken for an IP address and made a link.
 VERSION = re.compile(r"(?<![\w.\[/`])(\d+\.\d+\.\d+\.\d+)(?![\w`]|\.\w)")
 HASHTAG = re.compile(r"\w+")
+EMOJI_ID = re.compile(r"\d+")
 ADDRESS = re.compile(r"(https?|tg)://\S+")
 
 
@@ -82,6 +90,13 @@ def sections(notes):
     return parts[0].strip(), pairs
 
 
+def compact_headings(text):
+    """'## A' as a bold label and '### B' as a plain label, each a paragraph of its own."""
+    text = re.sub(r"\n*^###[ \t]+(.+?)[ \t]*\n+", r"\n\n\1\n\n", text, flags=re.MULTILINE)
+    text = re.sub(r"\n*^##[ \t]+(.+?)[ \t]*\n+", r"\n\n**\1**\n\n", text, flags=re.MULTILINE)
+    return text.strip()
+
+
 def details(summary, body):
     return f"<details><summary>{html.escape(summary)}</summary>\n{body.strip()}\n</details>"
 
@@ -92,15 +107,20 @@ def notes_blocks(notes, fold=(), drop=()):
     A heading the notes do not have is passed over: the same headings are
     given for every release, and not every release has every section.
     """
+    return [block for _, block in notes_sections(notes, fold, drop)]
+
+
+def notes_sections(notes, fold=(), drop=()):
+    """The notes as (heading, block); the introduction has the heading ''."""
     introduction, pairs = sections(plain_versions(notes))
-    blocks = [introduction] if introduction else []
+    blocks = [("", introduction)] if introduction else []
     for heading, body in pairs:
         if heading in drop:
             continue
         elif heading in fold:
-            blocks.append(details(heading, body))
+            blocks.append((heading, details(heading, compact_headings(body))))
         else:
-            blocks.append(f"## {heading}\n\n{body}")
+            blocks.append((heading, f"**{heading}**\n\n{compact_headings(body)}"))
     return blocks
 
 
@@ -182,9 +202,9 @@ def commits_block(entries, repository=""):
                 continue
             short = commit["sha"][:7]
             if short and repository:
-                chip = f"[`{short}`]({repository.rstrip('/')}/commit/{commit['sha']}) "
+                chip = f"[\\[{short}\\]]({repository.rstrip('/')}/commit/{commit['sha']}) "
             else:
-                chip = f"`{short}` " if short else ""
+                chip = f"\\[{short}\\] " if short else ""
             lines.append(f"- {chip}{escape(commit['subject'])}")
             for path, address in commit["settings"]:
                 where = f"[{escape(path)}]({address})" if ADDRESS.fullmatch(address) else escape(path)
@@ -222,14 +242,19 @@ def arrange(names, rules):
 
 
 def parse_button(value):
-    """'TEXT=ADDRESS', with '*' before the text of the main button."""
+    """'TEXT=ADDRESS', with '*' or '<style>:' before the text of a styled button."""
     text, separator, address = value.partition("=")
     text, address = text.strip(), address.strip()
-    primary = text.startswith("*")
-    text = text.lstrip("*").strip()
+    style = ""
+    if text.startswith("*"):
+        style, text = "primary", text[1:].strip()
+    else:
+        name, colon, rest = text.partition(":")
+        if colon and name.strip() in BUTTON_STYLES:
+            style, text = name.strip(), rest.strip()
     if not separator or not text or not (address == POST or ADDRESS.fullmatch(address)):
         raise PostError(f"'{value}' is not a button: write TEXT=ADDRESS")
-    return text, address, primary
+    return text, address, style
 
 
 def parse_button_row(line):
@@ -241,17 +266,17 @@ def buttons_block(rows, post=""):
     blocks = []
     for row in rows:
         buttons = []
-        for text, address, primary in row:
+        for text, address, style in row:
             if address == POST:
                 if not post:
                     continue
                 address = post
-            style = ' style="primary"' if primary else ""
+            styled = f' style="{style}"' if style else ""
             buttons.append(
-                f'  <tg-button type="url"{style} url="{html.escape(address)}">{html.escape(text)}</tg-button>'
+                f'  <tg-button type="url"{styled} url="{html.escape(address)}">{html.escape(text)}</tg-button>'
             )
         if buttons:
-            blocks.append('<tg-button-row align="center">\n' + "\n".join(buttons) + "\n</tg-button-row>")
+            blocks.append('<tg-button-row>\n' + "\n".join(buttons) + "\n</tg-button-row>")
     return "\n".join(blocks)
 
 
@@ -277,16 +302,48 @@ def files_block(files, title="", folded_title=""):
     return "\n\n".join(blocks)
 
 
-def heading(title, version, build="", small=False):
-    text = f"{'###' if small else '#'} {escape(title)} `{version.replace('`', '')}`"
+def emoji_mark(value):
+    """A plain emoji, or '<emoji> <custom emoji id>' shown as that custom emoji."""
+    emoji, _, custom = value.strip().partition(" ")
+    custom = custom.strip()
+    if not custom:
+        return emoji
+    if not EMOJI_ID.fullmatch(custom):
+        raise PostError(f"'{value}' is not an emoji: write EMOJI or EMOJI CUSTOM_EMOJI_ID")
+    return f"![{emoji}](tg://emoji?id={custom})"
+
+
+def heading(title, version, build="", emoji=""):
+    version = version.strip()
+    if version and version[0] not in "vV":
+        version = "v" + version
+    parts = [emoji_mark(emoji) if emoji.strip() else "", escape(title), escape(version)]
+    text = "## " + " ".join(part for part in parts if part)
     return text + (f" \\({escape(build)}\\)" if build else "")
 
 
+def quote(blocks):
+    """The blocks as one block quotation."""
+    text = "\n\n".join(block for block in blocks if block)
+    return "\n".join(f"> {line}" if line else ">" for line in text.split("\n")) if text else ""
+
+
+def changelog_block(blocks, title=CHANGELOG_TITLE):
+    """The notes or the commits quoted under the title of the changelog."""
+    body = quote(blocks)
+    if not body:
+        return ""
+    return f"**{escape(title)}**\n\n{body}" if title else body
+
+
 def hashtags_line(tags):
+    """The hashtags as the footer of the post, after an empty line."""
     for tag in tags:
         if not HASHTAG.fullmatch(tag):
             raise PostError(f"'{tag}' is not a hashtag: letters, digits and '_' only")
-    return " ".join(f"\\#{tag}" for tag in tags)
+    if not tags:
+        return ""
+    return "&nbsp;\n\n<footer>" + " ".join(f"#{tag}" for tag in tags) + "</footer>"
 
 
 def compose(blocks):

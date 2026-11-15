@@ -37,7 +37,7 @@ inputs:
     description: "'rich' for one rich message, 'album' for documents with a short caption under the last."
     default: rich
   kind:
-    description: "'release', or 'test' for a build of a push: a smaller title, sent without a notification."
+    description: "'release', or 'test' for a build of a push, sent without a notification."
     default: release
   title:
     description: Name of the application.
@@ -45,6 +45,11 @@ inputs:
     description: Version shown after the title.
   build:
     description: Shown in brackets after the version, such as a commit or a build number.
+  title-emoji:
+    description: "Emoji before the title: EMOJI, or 'EMOJI CUSTOM_EMOJI_ID' for a custom emoji (the bot needs a Fragment username)."
+  changelog-title:
+    description: Shown above the quoted notes or commits; empty for none.
+    default: 更新日志 | Changelog
   hashtags:
     description: Hashtags without '#', separated by spaces.
   notes-file:
@@ -55,6 +60,8 @@ inputs:
     description: Headings of the '## ' sections of the notes to fold, one per line.
   drop-sections:
     description: Headings of the '## ' sections of the notes to leave out, one per line.
+  unquoted-sections:
+    description: Headings of the '## ' sections of the notes shown after the quoted changelog, such as how to install, one per line.
   commits-file:
     description: 'JSON list of commits, [{"id", "message"}] as in a push event; shown grouped by their kind.'
   repository:
@@ -100,11 +107,14 @@ runs:
         TITLE: ${{ inputs.title }}
         VERSION: ${{ inputs.version }}
         BUILD: ${{ inputs.build }}
+        TITLE_EMOJI: ${{ inputs.title-emoji }}
+        CHANGELOG_TITLE: ${{ inputs.changelog-title }}
         HASHTAGS: ${{ inputs.hashtags }}
         NOTES_FILE: ${{ inputs.notes-file }}
         NOTES_EN_FILE: ${{ inputs.notes-en-file }}
         FOLD_SECTIONS: ${{ inputs.fold-sections }}
         DROP_SECTIONS: ${{ inputs.drop-sections }}
+        UNQUOTED_SECTIONS: ${{ inputs.unquoted-sections }}
         COMMITS_FILE: ${{ inputs.commits-file }}
         REPOSITORY: ${{ inputs.repository }}
         BODY_FILE: ${{ inputs.body-file }}
@@ -150,6 +160,8 @@ runs:
         single --title "$TITLE"
         single --version "$VERSION"
         single --build "$BUILD"
+        single --title-emoji "$TITLE_EMOJI"
+        arguments+=(--changelog-title "$CHANGELOG_TITLE")
         single --notes-file "$NOTES_FILE"
         single --notes-en-file "$NOTES_EN_FILE"
         single --commits-file "$COMMITS_FILE"
@@ -168,6 +180,7 @@ runs:
         }
         lines --fold-section "$FOLD_SECTIONS"
         lines --drop-section "$DROP_SECTIONS"
+        lines --unquoted-section "$UNQUOTED_SECTIONS"
         lines --file-rule "$FILES"
         lines --button-row "$BUTTONS"
 

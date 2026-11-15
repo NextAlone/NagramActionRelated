@@ -41,13 +41,26 @@ class TextTest(unittest.TestCase):
         )
 
     def test_heading(self):
-        self.assertEqual(post.heading("Nagram Desktop", "7.3.0.1"), "# Nagram Desktop `7.3.0.1`")
+        self.assertEqual(post.heading("Nagram Desktop", "7.3.0.1"), "## Nagram Desktop v7.3.0.1")
+        self.assertEqual(post.heading("Nagram", "v12.10.6", "7112", "🚀"), "## 🚀 Nagram v12.10.6 \\(7112\\)")
         self.assertEqual(
-            post.heading("Nagram", "12.10.6", "7112", small=True), "### Nagram `12.10.6` \\(7112\\)"
+            post.heading("Nagram", "1.0", emoji="🚀 5368324170671202286"),
+            "## ![🚀](tg://emoji?id=5368324170671202286) Nagram v1.0",
         )
+        with self.assertRaises(post.PostError):
+            post.heading("Nagram", "1.0", emoji="🚀 x")
+
+    def test_changelog_is_quoted_under_its_title(self):
+        self.assertEqual(
+            post.changelog_block(["**🔧 Fixes**\n- a", "", "<details><summary>B</summary>\nb\n</details>"]),
+            "**更新日志 \\| Changelog**\n\n> **🔧 Fixes**\n> - a\n>\n"
+            "> <details><summary>B</summary>\n> b\n> </details>",
+        )
+        self.assertEqual(post.changelog_block(["a"], ""), "> a")
+        self.assertEqual(post.changelog_block(["", ""]), "")
 
     def test_hashtags(self):
-        self.assertEqual(post.hashtags_line(["desktop", "beta"]), "\\#desktop \\#beta")
+        self.assertEqual(post.hashtags_line(["desktop", "beta"]), "&nbsp;\n\n<footer>#desktop #beta</footer>")
         self.assertEqual(post.hashtags_line([]), "")
         with self.assertRaises(post.PostError):
             post.hashtags_line(["two words"])
@@ -71,8 +84,21 @@ class NotesTest(unittest.TestCase):
             [
                 "Nagram Desktop `7.3.0.1`, see [7.2.10.3](https://example.org/v7.2.10.3).",
                 "<details><summary>Upstream</summary>\n- wallet\n</details>",
-                "## New\n\n- one\n- `7.3.0.1` stays",
+                "**New**\n\n- one\n- `7.3.0.1` stays",
             ],
+        )
+
+    def test_subsections_are_plain_labels(self):
+        self.assertEqual(
+            post.notes_blocks("## 修复\n\n### 界面与交互\n- a\n### 功能与易用性\n\n- b\n"),
+            ["**修复**\n\n界面与交互\n\n- a\n\n功能与易用性\n\n- b"],
+        )
+        self.assertEqual(post.compact_headings("## New\n- a\n\n## Fixes\n### UI\n- b"), "**New**\n\n- a\n\n**Fixes**\n\nUI\n\n- b")
+
+    def test_sections_keep_their_headings(self):
+        self.assertEqual(
+            post.notes_sections("Intro.\n\n## New\n- a\n\n## Install\n- b\n", fold=["Install"]),
+            [("", "Intro."), ("New", "**New**\n\n- a"), ("Install", "<details><summary>Install</summary>\n- b\n</details>")],
         )
 
     def test_notes_without_sections(self):
@@ -81,7 +107,7 @@ class NotesTest(unittest.TestCase):
     def test_heading_the_notes_do_not_have_is_passed_over(self):
         self.assertEqual(
             post.notes_blocks("Intro.\n\n## New\n\n- one\n", fold=["Upstream"], drop=["Packages"]),
-            ["Intro.", "## New\n\n- one"],
+            ["Intro.", "**New**\n\n- one"],
         )
 
     def test_summary_is_not_taken_for_a_tag(self):
@@ -100,24 +126,24 @@ class CommitsTest(unittest.TestCase):
         ]
         self.assertEqual(
             post.commits_block(commits, "https://e.org/r/"),
-            "**✨ Features**\n- [`3333333`](https://e.org/r/commit/3333333cccc) FEAT!: two\n\n"
-            "**🔧 Fixes**\n- [`2222222`](https://e.org/r/commit/2222222bbbb) fix\\(ui\\): one\n"
+            "**✨ Features**\n- [\\[3333333\\]](https://e.org/r/commit/3333333cccc) FEAT!: two\n\n"
+            "**🔧 Fixes**\n- [\\[2222222\\]](https://e.org/r/commit/2222222bbbb) fix\\(ui\\): one\n"
             "  <details><summary>Details</summary>\n  body\n  </details>\n\n"
-            "**♻️ Refactor**\n- [`6666666`](https://e.org/r/commit/6666666ffff) refa: four\n\n"
-            "**🧹 Chore**\n- [`1111111`](https://e.org/r/commit/1111111aaaa) chore: three\n\n"
-            "**🔀 Merge**\n- [`4444444`](https://e.org/r/commit/4444444dddd) Merge branch 'x'\n\n"
-            "**📌 Other**\n- [`5555555`](https://e.org/r/commit/5555555eeee) no kind here",
+            "**♻️ Refactor**\n- [\\[6666666\\]](https://e.org/r/commit/6666666ffff) refa: four\n\n"
+            "**🧹 Chore**\n- [\\[1111111\\]](https://e.org/r/commit/1111111aaaa) chore: three\n\n"
+            "**🔀 Merge**\n- [\\[4444444\\]](https://e.org/r/commit/4444444dddd) Merge branch 'x'\n\n"
+            "**📌 Other**\n- [\\[5555555\\]](https://e.org/r/commit/5555555eeee) no kind here",
         )
 
     def test_commit_without_a_repository_or_an_id(self):
-        self.assertEqual(post.commits_block([{"id": "abcdef0123", "message": "fix: a"}]), "**🔧 Fixes**\n- `abcdef0` fix: a")
+        self.assertEqual(post.commits_block([{"id": "abcdef0123", "message": "fix: a"}]), "**🔧 Fixes**\n- \\[abcdef0\\] fix: a")
         self.assertEqual(post.commits_block([{"message": "fix: a"}]), "**🔧 Fixes**\n- fix: a")
 
     def test_setting_paths_follow_their_commit(self):
         message = "feat: quick reply\n\nSetting-Path: Chats > Quick reply | tg://nnn/chat?r=quick\nsetting-path: Plain"
         self.assertEqual(
             post.commits_block([{"id": "abcdef0123", "message": message}]),
-            "**✨ Features**\n- `abcdef0` feat: quick reply\n"
+            "**✨ Features**\n- \\[abcdef0\\] feat: quick reply\n"
             "  - ↳ [Chats \\> Quick reply](tg://nnn/chat?r=quick)\n"
             "  - ↳ Plain",
         )
@@ -131,7 +157,7 @@ class CommitsTest(unittest.TestCase):
         )
         self.assertEqual(
             post.commits_block([{"id": "abcdef0123", "message": message}]),
-            "**✨ Features**\n- `abcdef0` feat: qr codes\n"
+            "**✨ Features**\n- \\[abcdef0\\] feat: qr codes\n"
             "  - ↳ Chats\n"
             "  <details><summary>Details</summary>\n"
             "  新增 QR 码支持 &lt;b\\>\n  实现扫描 \\#1\n\n  thanks to @Nekogram\n"
@@ -206,24 +232,25 @@ class FilesTest(unittest.TestCase):
 class ButtonsTest(unittest.TestCase):
     def test_parse(self):
         self.assertEqual(
-            post.parse_button_row("*GitHub Release=https://e.org/a=b | Assets = {post}"),
-            [("GitHub Release", "https://e.org/a=b", True), ("Assets", "{post}", False)],
+            post.parse_button_row("*GitHub Release=https://e.org/a=b | Assets = {post} | danger: 问题反馈=https://t.me/x"),
+            [("GitHub Release", "https://e.org/a=b", "primary"), ("Assets", "{post}", ""), ("问题反馈", "https://t.me/x", "danger")],
         )
+        self.assertEqual(post.parse_button("Note: a=https://e.org"), ("Note: a", "https://e.org", ""))
         for value in ("https://e.org", "=https://e.org", "Release=javascript:1", "A=https://e.org | B"):
             with self.assertRaises(post.PostError):
                 post.parse_button_row(value)
 
     def test_buttons_of_the_post_need_its_address(self):
-        rows = [[("Release", "https://e.org/?a=1&b=2", True)], [("A <b>", "{post}", False)]]
+        rows = [[("Release", "https://e.org/?a=1&b=2", "primary")], [("A <b>", "{post}", "")]]
         first = (
-            '<tg-button-row align="center">\n'
+            '<tg-button-row>\n'
             '  <tg-button type="url" style="primary" url="https://e.org/?a=1&amp;b=2">Release</tg-button>\n'
             "</tg-button-row>"
         )
         self.assertEqual(post.buttons_block(rows), first)
         self.assertEqual(
             post.buttons_block(rows, "https://t.me/c/1/2"),
-            first + '\n<tg-button-row align="center">\n'
+            first + '\n<tg-button-row>\n'
             '  <tg-button type="url" url="https://t.me/c/1/2">A &lt;b&gt;</tg-button>\n'
             "</tg-button-row>",
         )

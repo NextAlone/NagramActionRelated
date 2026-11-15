@@ -11,17 +11,22 @@ uses: NextAlone/NagramActionRelated/<action>@<commit>
 Posts the files of a directory to a Telegram channel. Every application hands over its data and gets the same layout, by default one rich message:
 
 ```
-# <title> <version> (<build>)
-#hashtags
-
-<notes of the release, with chosen sections folded or left out>
-<English notes, folded>
-<commits, grouped by their kind>
+## <emoji> <title> v<version> (<build>)
+<text>
 
 ## <files title>
 <files with their captions; the less wanted ones folded>
 
-<rows of buttons>
+---
+**<changelog title>**
+> <notes of the release, chosen sections folded or left out>
+> <commits, grouped by their kind>
+> <English notes, folded>
+<sections of the notes that are no part of the changelog>
+
+<one row of buttons per line, as wide as the post>
+
+<footer>#hashtags</footer>
 ```
 
 Build packages are larger than the 50 MB the public Bot API accepts, so the action runs a Bot API server in `--local` mode for the duration of the call (2000 MB per file, files are read by their path instead of being uploaded over HTTP). It needs an `ubuntu-24.04` runner, the system the server is built on: a macOS or Windows build hands its files over as an artifact to a Linux job.
@@ -81,18 +86,21 @@ A build of a push, with the commits it brings:
 | `copy-to` | Other channels that get the post as well, separated by spaces or lines. The files are not sent again. |
 | `directory` | Directory whose files are posted; it must hold at least one. Without it a rich message of text alone is posted, for a release that has no files to give, such as one submitted to an app store. |
 | `style` | `rich` (default) for one rich message; `album` for documents in albums of up to ten with a short caption under the last, for the clients and the cases a rich message does not suit. |
-| `kind` | `release` (default), or `test` for a build of a push: a smaller title, sent without a notification. |
-| `title`, `version`, `build` | The heading: the name, the version, and what is shown in brackets after it. |
+| `kind` | `release` (default), or `test` for a build of a push, sent without a notification. |
+| `title`, `version`, `build` | The heading: the name, the version (with a `v` before it), and what is shown in brackets after it. |
+| `title-emoji` | Emoji before the title: `EMOJI`, or `EMOJI CUSTOM_EMOJI_ID` for a custom emoji, which a bot may use only with a username bought on Fragment. |
+| `changelog-title` | Bold line above the quoted notes and commits, `更新日志 \\| Changelog` by default; empty for none. |
 | `hashtags` | Hashtags without `#`, separated by spaces. |
-| `notes-file` | Markdown notes of the release, sent as they are. A version of four parts is set in code style, because a client takes it for an IP address. |
-| `notes-en-file` | English notes, folded under the others. |
+| `notes-file` | Markdown notes of the release, quoted under the changelog title; a `## ` heading is shown as a bold label and a `### ` heading as a plain one. A version of four parts is set in code style, because a client takes it for an IP address. |
+| `notes-en-file` | English notes, folded at the end of the quoted changelog. |
 | `fold-sections`, `drop-sections` | Headings of the `## ` sections of the notes to fold or to leave out, one per line. A heading the notes do not have is passed over. |
+| `unquoted-sections` | Headings of the `## ` sections that are no part of the changelog, such as how to install, shown after the quotation; one per line. |
 | `commits-file` | JSON list of commits, `[{"id", "message"}]` as in a push event. They are shown grouped by their Conventional Commits kind and linked to `repository`; past forty only a count is left. A `Setting-Path: <path> \| <address>` trailer is shown under its commit. The body of a commit is folded under it without the trailers that end it, cut past 1000 characters; past 16000 characters of bodies the later commits are shown without theirs. |
 | `repository` | Address of the repository the commits link to; the calling repository by default. |
 | `body-file` | Plain text under the title. |
 | `files-title`, `folded-files-title` | Heading above the files and summary of the folded ones. |
 | `files` | Order and captions of the files, one `PATTERN \| CAPTION \| folded` per line; the caption and `folded` are optional. A line that matches nothing is skipped, files no line matches come last. |
-| `buttons` | Rows of buttons, one row per line: `TEXT=ADDRESS \| TEXT=ADDRESS`. `*` before a text marks the main button. The address `{post}` is the first post of the files; such a button is left out of that post and shown in the copies. |
+| `buttons` | Rows of buttons, one row per line: `TEXT=ADDRESS \| TEXT=ADDRESS`. `*` before a text marks the main button; `primary:`, `success:`, `danger:` or `link:` before it gives that style. The address `{post}` is the first post of the files; such a button is left out of that post and shown in the copies. |
 | `caption-file` | A ready HTML caption of an album, used instead of the parts above. |
 
 The output `messages` is JSON, `[{"file": <name>, "message_id": <id>}]`, for steps that record the posted messages elsewhere, such as the metadata an in-app updater reads. It lists the messages in `chat-id`, not the copies; the files of a rich message share one message.

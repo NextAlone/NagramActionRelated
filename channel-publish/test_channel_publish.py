@@ -371,16 +371,16 @@ class PublishTest(unittest.TestCase):
         )
         self.assertEqual(
             payload["rich_message"]["markdown"],
-            "# Nagram Desktop `7.3.0.1`\n\n"
-            "\\#desktop \\#release\n\n"
+            "## Nagram Desktop v7.3.0.1\n\n"
             "## Download\n\n"
             '![](tg://document?id=f0 "Second")\n\n'
             "<details><summary>Other</summary>\n"
             '![](tg://document?id=f1 "First")\n'
             "</details>\n\n"
-            '<tg-button-row align="center">\n'
+            '<tg-button-row>\n'
             '  <tg-button type="url" style="primary" url="https://example.org/r">GitHub Release</tg-button>\n'
-            "</tg-button-row>\n",
+            "</tg-button-row>\n\n"
+            "&nbsp;\n\n<footer>#desktop #release</footer>\n",
         )
         self.assertEqual(
             json.loads(result.read_text(encoding="utf-8")),
@@ -434,9 +434,11 @@ class PublishTest(unittest.TestCase):
         self.assertIs(payload["disable_notification"], True)
         self.assertEqual(
             payload["rich_message"]["markdown"],
-            "### Nagram `1.0` \\(abcdef0\\)\n\n"
-            "**🔧 Fixes**\n- [`abcdef0`](https://example.org/repo/commit/abcdef0123) fix: one\n\n"
-            "![](tg://document?id=f0)\n",
+            "## Nagram v1.0 \\(abcdef0\\)\n\n"
+            "![](tg://document?id=f0)\n\n"
+            "---\n\n"
+            "**更新日志 \\| Changelog**\n\n"
+            "> **🔧 Fixes**\n> - [\\[abcdef0\\]](https://example.org/repo/commit/abcdef0123) fix: one\n",
         )
 
     def test_rich_post_without_files_is_text_alone(self):
@@ -456,13 +458,14 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(first["rich_message"]["media"], [])
         self.assertEqual(
             first["rich_message"]["markdown"],
-            "# Nagram `1.0` \\(7\\)\n\n"
-            "\\#release\n\n"
-            "Submitted for review.\n\n"
-            "## New\n\n- one\n\n"
-            '<tg-button-row align="center">\n'
+            "## Nagram v1.0 \\(7\\)\n\n"
+            "**更新日志 \\| Changelog**\n\n"
+            "> Submitted for review.\n>\n"
+            "> **New**\n>\n> - one\n\n"
+            '<tg-button-row>\n'
             '  <tg-button type="url" style="primary" url="https://example.org/app">App Store</tg-button>\n'
-            "</tg-button-row>\n",
+            "</tg-button-row>\n\n"
+            "&nbsp;\n\n<footer>#release</footer>\n",
         )
         self.assertEqual(second["chat_id"], "@official")
         self.assertEqual(second["rich_message"]["media"], [])
@@ -475,13 +478,30 @@ class PublishTest(unittest.TestCase):
             "--dry-run", str(self.files(1)[0]), token="",
         )
         self.assertEqual(status, 0)
-        self.assertEqual(out, "# Nagram `1.0`\n\n![](tg://document?id=f0)\nNagram-00.zip\nalso to @official\n")
+        self.assertEqual(out, "## Nagram v1.0\n\n![](tg://document?id=f0)\nNagram-00.zip\nalso to @official\n")
         status, out, _ = self.run_main(
             "--style", "album", "--chat-id", "1", "--title", "Nagram", "--version", "1.0",
             "--dry-run", str(self.files(1)[0]), token="",
         )
         self.assertEqual(status, 0)
         self.assertEqual(out, "<b>Nagram</b> <code>1.0</code>\nNagram-00.zip\n")
+
+    def test_folded_sections_stay_quoted_unless_unquoted(self):
+        notes = self.root / "notes.md"
+        notes.write_text("## New\n- a\n\n## Upstream\n- b\n\n## Install\n- c\n", encoding="utf-8")
+        status, out, _ = self.run_main(
+            "--chat-id", "1", "--title", "Nagram", "--version", "1.0", "--notes-file", str(notes),
+            "--fold-section", "Upstream", "--fold-section", "Install", "--unquoted-section", "Install",
+            "--dry-run", token="",
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            out,
+            "## Nagram v1.0\n\n**更新日志 \\| Changelog**\n\n"
+            "> **New**\n>\n> - a\n>\n"
+            "> <details><summary>Upstream</summary>\n> - b\n> </details>\n\n"
+            "<details><summary>Install</summary>\n- c\n</details>\n\n",
+        )
 
     def test_main_failures(self):
         path = str(self.files(1)[0])

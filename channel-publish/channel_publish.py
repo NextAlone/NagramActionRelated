@@ -259,24 +259,32 @@ def send_rich(api, token, chat, markdown, media, silent=False, sleep=time.sleep)
 
 def rich_text(args, arranged, post=""):
     """The Markdown of the post; arranged is [(name, caption, folded)]."""
-    blocks = [
-        rich_post.heading(args.title, args.version, args.build, small=args.kind == "test"),
-        rich_post.hashtags_line(args.hashtag),
-    ]
-    if args.notes_file:
-        notes = Path(args.notes_file).read_text(encoding="utf-8")
-        blocks.extend(rich_post.notes_blocks(notes, args.fold_section, args.drop_section))
-    if args.notes_en_file:
-        english = Path(args.notes_en_file).read_text(encoding="utf-8")
-        blocks.append(rich_post.details("English", rich_post.plain_versions(english)))
-    if args.commits_file:
-        blocks.append(rich_post.commits_block(read_commits(args.commits_file), args.repository))
+    blocks = [rich_post.heading(args.title, args.version, args.build, args.title_emoji)]
     if args.body_file:
         blocks.append(rich_post.escape(Path(args.body_file).read_text(encoding="utf-8").strip()))
     files = [(f"f{index}", caption, folded) for index, (_, caption, folded) in enumerate(arranged)]
-    blocks.append(rich_post.files_block(files, args.files_title, args.folded_files_title))
+    files_block = rich_post.files_block(files, args.files_title, args.folded_files_title)
+    blocks.append(files_block)
+    # The changelog, with its folded sections and English notes, is quoted;
+    # the sections that are no part of it, such as how to install, follow.
+    changelog, folded = [], []
+    if args.notes_file:
+        notes = Path(args.notes_file).read_text(encoding="utf-8")
+        for heading, block in rich_post.notes_sections(notes, args.fold_section, args.drop_section):
+            (folded if heading and heading in args.unquoted_section else changelog).append(block)
+    if args.notes_en_file:
+        english = Path(args.notes_en_file).read_text(encoding="utf-8")
+        changelog.append(rich_post.details("English", rich_post.compact_headings(rich_post.plain_versions(english))))
+    if args.commits_file:
+        changelog.append(rich_post.commits_block(read_commits(args.commits_file), args.repository))
+    changelog_block = rich_post.changelog_block(changelog, args.changelog_title)
+    if files_block and (changelog_block or folded):
+        blocks.append("---")
+    blocks.append(changelog_block)
+    blocks.extend(folded)
     rows = [rich_post.parse_button_row(line) for line in args.button_row]
     blocks.append(rich_post.buttons_block(rows, post))
+    blocks.append(rich_post.hashtags_line(args.hashtag))
     return rich_post.compose(blocks)
 
 
@@ -347,10 +355,13 @@ def main(argv=None):
                         help="another channel that gets the post as well")
     parser.add_argument("--style", choices=("rich", "album"), default="rich")
     parser.add_argument("--kind", choices=("release", "test"), default="release",
-                        help="a test build has a smaller title and is sent silently")
+                        help="a test build is sent silently")
     parser.add_argument("--title", help="the name of the application")
     parser.add_argument("--version")
     parser.add_argument("--build", default="", help="shown in brackets after the version")
+    parser.add_argument("--title-emoji", default="", help="EMOJI or 'EMOJI CUSTOM_EMOJI_ID' before the title")
+    parser.add_argument("--changelog-title", default=rich_post.CHANGELOG_TITLE,
+                        help="shown above the quoted notes or commits; empty for none")
     parser.add_argument("--hashtag", action="append", default=[], help="without the '#'")
     parser.add_argument("--notes-file", help="Markdown notes of the release")
     parser.add_argument("--notes-en-file", help="English notes, folded under the others")
@@ -358,6 +369,8 @@ def main(argv=None):
                         help="a '## ' section of the notes to fold")
     parser.add_argument("--drop-section", action="append", default=[], metavar="HEADING",
                         help="a '## ' section of the notes to leave out")
+    parser.add_argument("--unquoted-section", action="append", default=[], metavar="HEADING",
+                        help="a '## ' section of the notes shown after the quoted changelog")
     parser.add_argument("--commits-file", help='JSON list of commits, [{"id", "message"}]')
     parser.add_argument("--repository", default="", help="address of the repository of the commits")
     parser.add_argument("--body-file", help="plain text under the title")
